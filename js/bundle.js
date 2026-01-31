@@ -1120,6 +1120,11 @@ function renderPaletteControls() {
                 updatePalette();
                 saveState();
                 if (originalImage) processImage();
+                
+                // On mobile, close sidebar after selection for better UX
+                if (window.innerWidth < 768) {
+                    toggleSidebar(false);
+                }
             }
         });
     });
@@ -1456,8 +1461,8 @@ function setupEventListeners() {
 
     // Touch Events for Mobile (Canvas)
     els.canvas.addEventListener('touchstart', (e) => {
-        if(e.touches.length === 1) {
-            e.preventDefault(); // Prevent scroll
+        if(e.touches.length === 1 && state.isEditing) {
+            e.preventDefault(); // Prevent scroll only when editing
             const touch = e.touches[0];
             const mouseEvent = new MouseEvent('mousedown', {
                 clientX: touch.clientX,
@@ -1468,7 +1473,7 @@ function setupEventListeners() {
     }, { passive: false });
 
     els.canvas.addEventListener('touchmove', (e) => {
-        if(e.touches.length === 1) {
+        if(e.touches.length === 1 && state.isEditing) {
             e.preventDefault(); 
             const touch = e.touches[0];
             const mouseEvent = new MouseEvent('mousemove', {
