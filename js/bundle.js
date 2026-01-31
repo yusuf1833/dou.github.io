@@ -994,12 +994,24 @@ const els = {
     infoColorName: document.getElementById('info-color-name'),
     infoColorHex: document.getElementById('info-color-hex'),
     infoCoords: document.getElementById('info-coords'),
+    
+    // Auth & Mobile
+    passwordModal: document.getElementById('password-modal'),
+    passwordInput: document.getElementById('password-input'),
+    passwordSubmit: document.getElementById('password-submit'),
+    passwordError: document.getElementById('password-error'),
+    
+    mobileMenuBtn: document.getElementById('mobile-menu-btn'),
+    closeSidebarBtn: document.getElementById('close-sidebar-btn'),
+    sidebar: document.getElementById('sidebar'),
+    sidebarOverlay: document.getElementById('sidebar-overlay'),
 };
 
 const ctx = els.canvas.getContext('2d');
 
 // --- Initialization ---
 function init() {
+    checkAuth();
     loadState();
     renderPaletteControls();
     setupEventListeners();
@@ -1008,6 +1020,36 @@ function init() {
     // if (state.originalImageSrc) {
     //     loadImage(state.originalImageSrc);
     // }
+}
+
+function checkAuth() {
+    const isAuth = sessionStorage.getItem('perler-auth');
+    if (isAuth === 'true') {
+        els.passwordModal.classList.add('hidden');
+    } else {
+        els.passwordModal.classList.remove('hidden');
+    }
+}
+
+function authenticate() {
+    const pwd = els.passwordInput.value;
+    if (pwd === '8888') {
+        sessionStorage.setItem('perler-auth', 'true');
+        els.passwordModal.classList.add('hidden');
+    } else {
+        els.passwordError.classList.remove('hidden');
+        els.passwordInput.value = '';
+    }
+}
+
+function toggleSidebar(show) {
+    if (show) {
+        els.sidebar.classList.remove('-translate-x-full');
+        els.sidebarOverlay.classList.remove('hidden');
+    } else {
+        els.sidebar.classList.add('-translate-x-full');
+        els.sidebarOverlay.classList.add('hidden');
+    }
 }
 
 function loadState() {
@@ -1292,6 +1334,17 @@ function undo() {
 window.selectBrushColor = selectBrushColor;
 
 function setupEventListeners() {
+    // Auth
+    els.passwordSubmit.addEventListener('click', authenticate);
+    els.passwordInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') authenticate();
+    });
+
+    // Mobile Sidebar
+    els.mobileMenuBtn.addEventListener('click', () => toggleSidebar(true));
+    els.closeSidebarBtn.addEventListener('click', () => toggleSidebar(false));
+    els.sidebarOverlay.addEventListener('click', () => toggleSidebar(false));
+
     // Editor Events
     els.editModeToggle.addEventListener('change', (e) => toggleEditMode(e.target.checked));
     
@@ -1401,6 +1454,36 @@ function setupEventListeners() {
         draw(); // Clear highlights
     });
 
+    // Touch Events for Mobile (Canvas)
+    els.canvas.addEventListener('touchstart', (e) => {
+        if(e.touches.length === 1) {
+            e.preventDefault(); // Prevent scroll
+            const touch = e.touches[0];
+            const mouseEvent = new MouseEvent('mousedown', {
+                clientX: touch.clientX,
+                clientY: touch.clientY
+            });
+            els.canvas.dispatchEvent(mouseEvent);
+        }
+    }, { passive: false });
+
+    els.canvas.addEventListener('touchmove', (e) => {
+        if(e.touches.length === 1) {
+            e.preventDefault(); 
+            const touch = e.touches[0];
+            const mouseEvent = new MouseEvent('mousemove', {
+                clientX: touch.clientX,
+                clientY: touch.clientY
+            });
+            els.canvas.dispatchEvent(mouseEvent);
+        }
+    }, { passive: false });
+
+    els.canvas.addEventListener('touchend', (e) => {
+        const mouseEvent = new MouseEvent('mouseup', {});
+        els.canvas.dispatchEvent(mouseEvent);
+    });
+
     // Image Editor Events
     els.editOriginalBtn.addEventListener('click', openImageEditor);
     els.imgEditorClose.addEventListener('click', closeImageEditor);
@@ -1411,6 +1494,43 @@ function setupEventListeners() {
     els.imgEditorCanvas.addEventListener('mousemove', moveImgDraw);
     els.imgEditorCanvas.addEventListener('mouseup', endImgDraw);
     els.imgEditorCanvas.addEventListener('mouseout', endImgDraw);
+
+    // Touch Events for Mobile (Image Editor)
+    els.imgEditorCanvas.addEventListener('touchstart', (e) => {
+        if(e.touches.length === 1) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            // Manually call startImgDraw with emulated event object
+            // because startImgDraw checks e.button === 0 which MouseEvent has, but we need to map positions carefully
+            // Actually better to dispatch events or adapt handler.
+            // Let's adapt handler to accept touch-like object or dispatch.
+            // Dispatching is easier for existing logic.
+            const mouseEvent = new MouseEvent('mousedown', {
+                clientX: touch.clientX,
+                clientY: touch.clientY,
+                button: 0
+            });
+            els.imgEditorCanvas.dispatchEvent(mouseEvent);
+        }
+    }, { passive: false });
+
+    els.imgEditorCanvas.addEventListener('touchmove', (e) => {
+        if(e.touches.length === 1) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const mouseEvent = new MouseEvent('mousemove', {
+                clientX: touch.clientX,
+                clientY: touch.clientY,
+                button: 0
+            });
+            els.imgEditorCanvas.dispatchEvent(mouseEvent);
+        }
+    }, { passive: false });
+
+    els.imgEditorCanvas.addEventListener('touchend', (e) => {
+         const mouseEvent = new MouseEvent('mouseup', { button: 0 });
+         els.imgEditorCanvas.dispatchEvent(mouseEvent);
+    });
 
     els.imgBrushSize.addEventListener('input', (e) => {
         els.imgBrushSizeVal.textContent = e.target.value;
