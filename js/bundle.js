@@ -631,7 +631,7 @@ function calculatePixelGrid(
 // 5. RENDERER (renderer.js)
 // ==========================================
 
-function renderGrid(ctx, gridData, pixelSize, showGridLines, width, height) {
+function renderGrid(ctx, gridData, pixelSize, showGridLines, width, height, excludedColors = []) {
     ctx.clearRect(0, 0, width, height);
     
     const rows = gridData.length;
@@ -642,11 +642,15 @@ function renderGrid(ctx, gridData, pixelSize, showGridLines, width, height) {
     for(let y=0; y<rows; y++) {
         for(let x=0; x<cols; x++) {
             const cell = gridData[y][x];
-            if(cell && cell.color !== 'transparent') {
+            
+            // Check if cell is valid AND NOT excluded
+            const isExcluded = cell && cell.key && excludedColors.includes(cell.key);
+            
+            if(cell && cell.color !== 'transparent' && !isExcluded) {
                 ctx.fillStyle = cell.color;
                 ctx.fillRect(x*pixelSize, y*pixelSize, pixelSize, pixelSize);
             } else {
-                // Draw checkerboard for transparent
+                // Draw checkerboard for transparent or excluded
                 ctx.fillStyle = ((x + y) % 2 === 0) ? '#f0f0f0' : '#ffffff';
                 ctx.fillRect(x*pixelSize, y*pixelSize, pixelSize, pixelSize);
             }
@@ -686,7 +690,7 @@ function highlightCell(ctx, x, y, pixelSize, color = 'rgba(255, 0, 0, 0.5)') {
 // 6. EXPORTER (exporter.js)
 // ==========================================
 
-function downloadProject(gridData, pixelSize, activeSystem, options = {}) {
+function downloadProject(gridData, pixelSize, activeSystem, options = {}, excludedColors = []) {
     if (!gridData || gridData.length === 0) return;
 
     const { showGrid = true, showCoords = true, hideLabels = false } = options;
@@ -703,7 +707,10 @@ function downloadProject(gridData, pixelSize, activeSystem, options = {}) {
     let totalBeads = 0;
     gridData.forEach(row => {
         row.forEach(cell => {
-            if (cell && cell.color !== 'transparent' && !cell.isExternal) {
+            // Check exclusion
+            const isExcluded = cell && cell.key && excludedColors.includes(cell.key);
+
+            if (cell && cell.color !== 'transparent' && !cell.isExternal && !isExcluded) {
                 const key = cell.key; // e.g., "A01"
                 if (!stats[key]) {
                     stats[key] = { 
@@ -766,7 +773,10 @@ function downloadProject(gridData, pixelSize, activeSystem, options = {}) {
              const px = x * outputPixelSize;
              const py = y * outputPixelSize;
              
-             if(cell && cell.color !== 'transparent' && !cell.isExternal) {
+             // Check exclusion
+             const isExcluded = cell && cell.key && excludedColors.includes(cell.key);
+
+             if(cell && cell.color !== 'transparent' && !cell.isExternal && !isExcluded) {
                 ctx.fillStyle = cell.color;
                 ctx.fillRect(px, py, outputPixelSize, outputPixelSize);
                 
@@ -1133,7 +1143,10 @@ function renderPaletteControls() {
 }
 
 function updatePalette() {
-    activePalette = generatePalette(state.activeSystems, state.excludedColors);
+    // No longer passing excludedColors to generatePalette
+    // The palette should always contain ALL colors of the system
+    // Exclusion is now handled at Render time, not Generation time
+    activePalette = generatePalette(state.activeSystems, []);
 }
 
 // --- Stats & Noise Removal Logic ---
@@ -1171,13 +1184,29 @@ function renderNoiseRemovalPanel() {
     
     els.noisePanel.classList.remove('hidden');
     
+    // stats contains ALL colors now (including excluded ones)
     const { stats, total } = calculateColorStats();
-    els.totalBeadsCount.textContent = total;
+    
+    // Filter into Active and Excluded
+    const activeStats = [];
+    const excludedStats = [];
+    
+    Object.values(stats).forEach(item => {
+        if (state.excludedColors.includes(item.key)) {
+            excludedStats.push(item);
+        } else {
+            activeStats.push(item);
+        }
+    });
+
+    // Update Total Count (Active only)
+    const activeTotal = activeStats.reduce((sum, item) => sum + item.count, 0);
+    els.totalBeadsCount.textContent = activeTotal;
     
     // 1. Render Active Colors
-    const sortedStats = Object.values(stats).sort((a, b) => a.count - b.count); // Ascending by count (easier to find noise)
+    activeStats.sort((a, b) => a.count - b.count); // Ascending
     
-    els.activeColorsList.innerHTML = sortedStats.map(item => `
+    els.activeColorsList.innerHTML = activeStats.map(item => `
         <div class="flex items-center justify-between group cursor-pointer hover:bg-red-50 p-1 rounded transition" 
              onclick="toggleColorExclusion('${item.key}')" title="点击排除此颜色">
             <div class="flex items-center gap-2">
@@ -1196,30 +1225,39 @@ function renderNoiseRemovalPanel() {
         els.excludedSection.classList.remove('hidden');
         els.restoreAllBtn.classList.remove('hidden');
         
-        // We need color hex for excluded keys. 
-        // Since they are not in activePalette, we must search in full mapping or keep a ref.
-        // Helper to find hex by key in current system
-        const currentSys = state.activeSystems[0];
+        // Render from excludedStats (which has real count and color)
+        // If an excluded color is not in gridData anymore (count 0?), we still might want to show it?
+        // But calculateColorStats iterates gridData. If gridData has the key, it will be here.
+        // What if a color is in excludedColors but NOT in gridData? 
+        // Then it won't be in stats. We should iterate state.excludedColors to be sure.
+        
+        // Better: Iterate state.excludedColors and try to find info in stats OR activePalette.
         
         const excludedItemsHtml = state.excludedColors.map(key => {
-            // Find hex for this key in current system
-            // Reverse lookup in colorSystemMapping
-            let hex = '#ccc';
-            for (const [h, systems] of Object.entries(colorSystemMapping)) {
-                if (systems[currentSys] === key) {
-                    hex = h;
-                    break;
-                }
+            let color = '#ccc';
+            let count = 0;
+            
+            // Try find in stats
+            if (stats[key]) {
+                color = stats[key].color;
+                count = stats[key].count;
+            } else {
+                // Try find in activePalette
+                const found = activePalette.find(c => c.key === key);
+                if (found) color = found.hex;
             }
             
             return `
                 <div class="flex items-center justify-between bg-gray-50 p-2 rounded border">
                     <div class="flex items-center gap-2">
-                        <div class="w-4 h-4 rounded border shadow-sm" style="background-color: ${hex}"></div>
+                        <div class="w-4 h-4 rounded border shadow-sm" style="background-color: ${color}"></div>
                         <span class="font-medium text-gray-600 text-xs">${key}</span>
                     </div>
-                    <button class="text-blue-500 hover:text-blue-700 text-xs bg-white px-2 py-0.5 rounded border shadow-sm"
+                    <div class="flex items-center gap-2">
+                         <span class="text-xs text-gray-400">(${count})</span>
+                         <button class="text-blue-500 hover:text-blue-700 text-xs bg-white px-2 py-0.5 rounded border shadow-sm"
                         onclick="toggleColorExclusion('${key}')">恢复</button>
+                    </div>
                 </div>
             `;
         }).join('');
@@ -1243,9 +1281,10 @@ window.toggleColorExclusion = function(key) {
         state.excludedColors.push(key);
     }
     
-    updatePalette();
+    // Only Draw and Update UI, NO Re-calculation of algorithm!
+    draw();
+    renderNoiseRemovalPanel();
     saveState();
-    processImage(); // Re-run
 };
 
 // --- Editor Functions ---
@@ -1432,7 +1471,7 @@ function setupEventListeners() {
             showCoords: exportOpts.showCoords.checked,
             hideLabels: exportOpts.hideLabels.checked
         };
-        downloadProject(state.gridData, pixelSize, state.activeSystems[0], opts);
+        downloadProject(state.gridData, pixelSize, state.activeSystems[0], opts, state.excludedColors);
     });
 
     // Toggle Excluded Section
@@ -1640,7 +1679,7 @@ function draw() {
     els.canvas.width = cols * pixelSize;
     els.canvas.height = rows * pixelSize;
     
-    renderGrid(ctx, state.gridData, pixelSize, state.showGrid, els.canvas.width, els.canvas.height);
+    renderGrid(ctx, state.gridData, pixelSize, state.showGrid, els.canvas.width, els.canvas.height, state.excludedColors);
 }
 
 function handleCanvasMouseDown(e) {
@@ -1742,14 +1781,15 @@ function paintCellAt(e) {
         };
         
         // Draw just this cell to be fast
-        // But we need to handle grid lines... 
-        // Full draw is safest but maybe slow on large grids.
-        // Let's try full draw first.
-        draw();
-        
-        // If we want highlight during drag:
-        highlightCell(ctx, col, row, pixelSize);
-    }
+    // But we need to handle grid lines... 
+    // Full draw is safest but maybe slow on large grids.
+    // Let's try full draw first.
+    draw();
+    renderNoiseRemovalPanel(); // Update stats in real-time when painting
+    
+    // If we want highlight during drag:
+    highlightCell(ctx, col, row, pixelSize);
+}
 }
 
 // Removed handleCanvasClick as it's replaced by mousedown/up
